@@ -24,11 +24,17 @@ from openerp.addons.connector.connector import ConnectorUnit
 
 
 class OnChangeManager(ConnectorUnit):
-    def merge_values(self, record, on_change_result):
+    def merge_values(self, model, record, on_change_result):
         vals = on_change_result.get('value', {})
         for key in vals:
             if not key in record:
-                record[key] = vals[key]
+                #Some onchange like partner onchange can return an empty value for a field
+                #This empty field should be not added in the record.
+                #For example a partner without payment_term will add an empty payment term on
+                #the sale order and as an empty value is added the onchange from the payment
+                #method will not fill correctly the payment term as the key already exist
+                if vals[key] or model._columns[key]._type == 'boolean':
+                    record[key] = vals[key]
 
 
 class SaleOrderOnChange(OnChangeManager):
@@ -49,6 +55,7 @@ class SaleOrderOnChange(OnChangeManager):
             None, # sale order ids not needed
             order['partner_id'],
         ]
+        self.session.context.update({'shop_id': order['shop_id']})
         kwargs = {'context': self.session.context}
         return args, kwargs
 
@@ -87,14 +94,14 @@ class SaleOrderOnChange(OnChangeManager):
                                           self.session.uid,
                                           *args,
                                           **kwargs)
-        self.merge_values(order, res)
+        self.merge_values(sale_model, order, res)
 
         args, kwargs = self._get_partner_id_onchange_param(order)
         res = sale_model.onchange_partner_id(self.session.cr,
                                              self.session.uid,
                                              *args,
                                              **kwargs)
-        self.merge_values(order, res)
+        self.merge_values(sale_model, order, res)
 
         # apply payment method
         args, kwargs = self._get_payment_method_id_onchange_param(order)
@@ -102,15 +109,14 @@ class SaleOrderOnChange(OnChangeManager):
                                                     self.session.uid,
                                                     *args,
                                                     **kwargs)
-        self.merge_values(order, res)
-
+        self.merge_values(sale_model, order, res)
         # apply default values from the workflow
         args, kwargs = self._get_workflow_process_id_onchange_param(order)
         res = sale_model.onchange_workflow_process_id(self.session.cr,
                                                       self.session.uid,
                                                       *args,
                                                       **kwargs)
-        self.merge_values(order, res)
+        self.merge_values(sale_model, order, res)
         return order
 
     def _get_product_id_onchange_param(self, line, previous_lines, order):
